@@ -1,15 +1,37 @@
-# -*- coding: utf-8 -*-
-import nmap
-import sys, getopt
-import openpyxl
-import datetime
-import time
+# -*- coding: UTF-8 -*-
+'''
+Desprition:
+    自动化批量nmap使用
 
-# 函数 ReadExcel 用于将 nmap 数据写入 xlsx 文件
+Author:
+    Sp4rkW   https://sp4rkw.blog.csdn.net/
+
+Modify:2019-08-05 14:42:20
+'''
+
+# -*- coding: utf-8 -*-
+import datetime,time,openpyxl,sys,getopt,nmap,threading
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+
+sem=threading.Semaphore(4) #限定最大线程数
+
+'''
+Desprition:
+    函数 ReadExcel 用于将 nmap 数据写入 xlsl 文件，并且做自适应宽度调整
+
+Parameters:
+    param nmap扫描之后的结果
+    url 目标站点url
+    starttime 开始的时间
+
+Returns:
+    Null
+
+Modify:2019-08-05 15:05:01
+'''
 def WriteExcel(param,url,starttime):
-    today = str(datetime.date.today())
-    nowtime = time.strftime("%H-%M-%S")
-    wb = openpyxl.Workbook()
+    wb = Workbook()
     sheet = wb.active
     sheet.title = url
     len1 = len(param)
@@ -18,64 +40,89 @@ def WriteExcel(param,url,starttime):
         len2 = len(demo)
         for j in range(0, len2):
             sheet.cell(row=i+1, column=j+1, value=str(demo[j]))
-    wb.save('./'+url+'-'+today+'-'+nowtime+'.xlsx')
-    print('#*# 文件：'+url+'-'+today+'-'+nowtime+'.xlsx 已经输出完毕')
+    col_width = []   #记录每一列的宽度
+    i = 0
+    for col in sheet.columns:
+        for j in range(len(col)):
+            if j == 0:
+	         	# 数组增加一个元素
+	            col_width.append(len(str(col[j].value)))
+            else:
+                # 获得每列中的内容的最大宽度
+                if col_width[i] < len(str(col[j].value)):
+                    col_width[i] = len(str(col[j].value))
+        i = i + 1
+    #设置列宽
+    for j in range(len(col_width)):
+        # 根据列的数字返回字母
+        col_letter = get_column_letter(j+1)
+        # 当宽度大于100，宽度设置为100
+        if col_width[j] > 100:
+            sheet.column_dimensions[col_letter].width = 100
+        # 只有当宽度大于10，才设置列宽
+        elif col_width[j] > 7:
+            sheet.column_dimensions[col_letter].width = col_width[j] + 2
+    wb.save('./'+url+'.xlsx')
+    print('#*# 文件：'+url+'.xlsx 已经输出完毕')
     endtime = datetime.datetime.now()
-    print ('耗时：'+str((endtime - starttime).seconds))
+    print ('耗时：'+str((endtime - starttime).seconds)+'s')
+
+
+'''
+Desprition:
+    函数 NmapExcel 调用 python-nmap 使用 nmap 扫描
+
+Parameters:
+    Null
+
+Returns:
+    Null
+
+Modify:2019-08-05 15:05:22
+'''
+
+def NmapExcel(param1,param2,url):
+    with sem:
+        nm = nmap.PortScanner() #创建nmap接口
+        # try:
+        starttime = datetime.datetime.now()
+        nm.scan(hosts=url, ports=param1, arguments=' -Pn -sS -sU '+param2)
+        nmap_data = nm.csv().split('\n')
+        WriteExcel(nmap_data,url,starttime)
+        # except Exception:
+        #     print('扫描出错，当前扫描进行到：'+url)
 
 
 
-# 函数 NmapExcel 调用 python-nmap 使用 nmap 扫描
-def NmapExcel(param1,param2):
-    nm = nmap.PortScanner() #创建nmap接口
-    website_urls = open('url.txt','r') #url.txt存储的是目标站点ip/url
-    if website_urls:
-        for url in website_urls:
-            try:
-                starttime = datetime.datetime.now()
-                nm.scan(hosts=url, ports=param1, arguments=' -Pn -sV'+param2)
-                # print(type(nm.csv()))   #host;hostname;hostname_type;protocol;port;name;state;product;extrainfo;reason;version;conf;cpe
-                nmap_data = nm.csv().split('\n')
-                WriteExcel(nmap_data,url,starttime)
-            except Exception:
-                print('扫描出错，当前扫描进行到：'+url)
-    else:
-        print("未读取到目标站点，请先添加目标")
-    website_urls.close()
 
+'''
+Desprition:
+    函数 StartFunc 用于输出相关参数的意义
 
+Parameters:
+    Null
 
-# 函数 StartFunc 用于输出相关参数的意义
+Returns:
+    Null
+
+Modify:2019-08-05 15:08:52
+'''
 def StartFunc(argv): 
     parameter1 = ''
     parameter2 = ''
     try:
-        opts, args = getopt.getopt(argv,"hp:o:",["port=","other="])
+        opts, args = getopt.getopt(sys.argv[1:],"hp:o:",["port=","other="])
     except getopt.GetoptError:
         print('python ./scan.py -p <需要扫描端口> -o <其他nmap参数>')
-        print('使用 -h 查看详细用法')
         sys.exit(2)
     for opt, arg in opts:
         if opt == '-h':
             print('python ./scan.py -p <需要扫描端口> -o <其他nmap参数>')
-            print('目标 url 请放在当前目录下的 url.txt 文件内')
-            print('-p  使用样例 -p port ，-p 1-65535')
-            print('-o  默认使用 -Pn  -sV 参数，无需重复输入')
-            print('注意：url只允许ip地址或者不带http/https头的域名地址')
             sys.exit()
         elif opt in ("-p", "--port"):
             parameter1 = arg
         elif opt in ("-o", "--other"):
             parameter2 = arg
-    print('#*# NmapToExcel 正在运行')
-    NmapExcel(parameter1,parameter2)
-#    print(parameter1)
-#    print(parameter2)
-
-
-
-
-if __name__ == "__main__":
     print('''
          )\____________________________|¯¯¯¯¯|__,,,,,. 
       )_         ||||||||||||||||||||||||||||||||||||||||||||||||||||||||            |    | 
@@ -90,7 +137,26 @@ if __name__ == "__main__":
 /}}}}}}}}}}}}}}/ 
 ¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯
 
-NmapToExcel version 1.0.0
-time 2019-3-8
+NmapToExcel version 1.1.0
+time 2019-8-5
     ''')
+    print('#*# NmapToExcel 正在运行')
+    data = open('url.txt','r') #url.txt存储的是目标站点ip/url
+    website_urls = data.readlines()
+    if website_urls:
+        for url in website_urls:
+            threading.Thread(target=NmapExcel, args=(parameter1,parameter2,url.replace('\n',''))).start()
+    else:
+            print("未读取到目标站点，请先添加目标")
+    data.close()
+
+    
+
+
+
+if __name__ == "__main__":
     StartFunc(sys.argv[1:])
+
+
+
+
